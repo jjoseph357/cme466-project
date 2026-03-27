@@ -8,22 +8,25 @@ from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtMultimedia import QSound
 from PyQt5 import uic
 import signal
+import os
+import warnings
 
-# These act as a bridge between the MQTT background thread and the main GUI thread.
+# --- Suppress the internal PyQt5/SIP deprecation warnings ---
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# --- 1. Thread-Safe Signals ---
 class MqttSignals(QObject):
-    posture_stagnant = pyqtSignal()
-    posture_moving = pyqtSignal()  
+    # Unified signal to handle incoming commands (e.g., 'N', 'A', 'P')
+    sensor_data = pyqtSignal(str) 
     video_frame = pyqtSignal(QImage)
 
+# --- 2. The Notification Widget ---
 class NotificationWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        
-        # Make the window translucent 
         self.setWindowOpacity(0.80) 
 
-        # Applied mid-gray background, white text, and no border
         self.setStyleSheet("""
             background-color: #7a7a7a; 
             color: #ffffff; 
@@ -49,67 +52,106 @@ class NotificationWidget(QWidget):
         
         self.move(x, y)
         self.show()
-        QSound.play("alert.wav") 
+        
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        audio_path = os.path.join(script_dir, "alert.wav")
+        QSound.play(audio_path) 
+        
         self.hide_timer.start(6000)
 
+# --- 3. The Main Window Application ---
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
-        # Load the UI file created in Qt Designer
+        # Get the absolute path of the directory where main.py lives
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        ui_path = os.path.join(script_dir, "posture_gui.ui")
+        
         try:
-            uic.loadUi("posture_gui.ui", self)
+            uic.loadUi(ui_path, self)
         except FileNotFoundError:
-            print("Error: Could not find 'posture_gui.ui'. Make sure it's in the same folder.")
+            print(f"Error: Could not find '{ui_path}'.")
             sys.exit(1)
 
         self.status_label.setText("UI Loaded Successfully! Starting systems...")
         self.notifier = NotificationWidget()
         
-        # Initialize core logic
+        # Initialize MQTT first so the slider can publish its initial value
+        self.setup_mqtt()
         self.setup_logic()
 
     def setup_logic(self):
-        """Wires up timers, signals, and MQTT networking."""
-        self.posture_timer = QTimer()
-        self.posture_timer.timeout.connect(self.trigger_notification)
-        self.timer_interval = 5000 
+        """Wires up timers, signals, and state variables."""
+        # State Variables
+        self.work_seconds = 0
+        self.is_absent = False
 
+        # Setup thread-safe signals
         self.mqtt_signals = MqttSignals()
-        self.mqtt_signals.posture_stagnant.connect(self.handle_stagnant_posture)
-        self.mqtt_signals.posture_moving.connect(self.handle_moving_posture) 
+        self.mqtt_signals.sensor_data.connect(self.handle_sensor_data)
         self.mqtt_signals.video_frame.connect(self.update_image)
 
-        self.setup_mqtt()
+        # Connect Slider to update logic and publish to RPi5
+        if not hasattr(self, 'interval_slider'):
+            print("Warning: Slider not found. Please add 'interval_slider' in Qt Designer.")
+        else:
+            self.interval_slider.valueChanged.connect(self.publish_interval)
+            self.publish_interval() # Publish the default value on startup
+
+        # Setup Work Duration Timer (Ticks exactly once per second)
+        self.work_timer = QTimer()
+        self.work_timer.timeout.connect(self.update_work_time)
+        self.work_timer.start(1000)
+
+    def publish_interval(self):
+        """Updates the label and publishes the slider value to the edge sensor."""
+        minutes = self.interval_slider.value()
+        self.interval_label.setText(f"Notification Interval: {minutes} minutes")
+        
+        # Publish to the RPi5 so it knows how long to wait
+        # QoS 1 and Retain=True ensures the RPi5 gets it even if it connects a second later
+        if hasattr(self, 'client'):
+            self.client.publish("sensor/interval", str(minutes), qos=1, retain=True)
+
+    def update_work_time(self):
+        """Ticks every second to track total work duration."""
+        if not self.is_absent:
+            self.work_seconds += 1
+            
+            hours, remainder = divmod(self.work_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            time_str = f"Time Worked: {hours:02d}:{minutes:02d}:{seconds:02d}"
+            
+            if hasattr(self, 'work_time_label'):
+                self.work_time_label.setText(time_str)
 
     def setup_mqtt(self):
-        self.client = mqtt.Client()
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
         
         broker_address = "test.mosquitto.org" 
         try:
             self.client.connect(broker_address, 1883, 60)
-            self.client.loop_start() # Spawns the network background thread
+            self.client.loop_start() 
         except Exception as e:
             self.status_label.setText(f"MQTT Error: Could not connect to {broker_address}")
 
-    def on_connect(self, client, userdata, flags, rc):
-        # Safely update the status label from the callback
-        self.status_label.setText("MQTT: Connected | Monitoring Posture...")
-        client.subscribe([("sensor/posture", 0), ("sensor/video", 0)])
+    def on_connect(self, client, userdata, flags, reason_code, properties):
+        if reason_code == 0:
+            self.status_label.setText("MQTT: Connected | Monitoring Posture...")
+            client.subscribe([("sensor/posture", 0), ("sensor/video", 0)])
+        else:
+            self.status_label.setText(f"MQTT Connection Failed: {reason_code}")
 
     def on_message(self, client, userdata, msg):
-        """Processes incoming data and emits signals to the GUI thread."""
+        """Processes incoming data and emits signals safely to the GUI thread."""
         if msg.topic == "sensor/posture":
-            payload = msg.payload.decode()
-            if payload == "STAGNANT":
-                self.mqtt_signals.posture_stagnant.emit()
-            elif payload == "MOVING":
-                self.mqtt_signals.posture_moving.emit()
+            payload = msg.payload.decode().strip().upper()
+            self.mqtt_signals.sensor_data.emit(payload)
                 
         elif msg.topic == "sensor/video":
-            # Convert raw bytes to a NumPy array, then decode via OpenCV
             nparr = np.frombuffer(msg.payload, np.uint8)
             cv_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
@@ -120,42 +162,35 @@ class MainWindow(QMainWindow):
                 
                 qt_img = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
                 p = qt_img.scaled(640, 480, Qt.KeepAspectRatio)
-                
                 self.mqtt_signals.video_frame.emit(p)
 
+    def handle_sensor_data(self, payload):
+        """Acts strictly on commands from the RPi5."""
+        if payload == "N":
+            # RPi5 says it's time to notify
+            self.notifier.show_notification()
+        elif payload == "A":
+            # RPi5 says user left frame (pauses work timer)
+            self.is_absent = True
+        elif payload == "P":
+            # RPi5 says user is present in frame (resumes work timer)
+            self.is_absent = False
+
     def update_image(self, qt_img):
-        """Receives the image signal and updates the UI."""
         self.video_label.setPixmap(QPixmap.fromImage(qt_img))
 
-    def handle_stagnant_posture(self):
-        """Starts the notification timer if it isn't already running."""
-        if not self.posture_timer.isActive():
-            self.posture_timer.start(self.timer_interval)
-    
-    def handle_moving_posture(self):
-        """Safely stops the timer from the main GUI thread."""
-        self.posture_timer.stop()
-
-    def trigger_notification(self):
-        """Fires the popup and resets the timer."""
-        self.notifier.show_notification()
-        self.posture_timer.stop() 
-
     def closeEvent(self, event):
-        """Ensures the MQTT thread shuts down cleanly when the window is closed."""
         self.client.loop_stop()
         event.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     
-    # handle the interrupt signal natively
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     
     window = MainWindow()
     window.show()
     
-    # register the Ctrl+C command from your terminal.
     catch_timer = QTimer()
     catch_timer.start(500)
     catch_timer.timeout.connect(lambda: None)
