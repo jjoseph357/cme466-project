@@ -26,8 +26,8 @@ def _env_str(key: str, default: str) -> str:
 IMAGES_DIR = _env_str("POSTURE_IMAGES_DIR", "images")
 POSTURE_JPG = _env_str("POSTURE_OUTPUT_IMAGE", "posture.jpg")
 MODEL_PATH = _env_str("POSTURE_MODEL_PATH", os.path.join("model", "small640.onnx"))
-IMG_INTERVAL = _env_float("POSTURE_CAPTURE_INTERVAL", 5.0)
-MAX_IMAGES = int(_env_float("POSTURE_MAX_IMAGES", 10))
+IMG_INTERVAL = _env_float("POSTURE_CAPTURE_INTERVAL", 1.0)
+MAX_IMAGES = int(_env_float("POSTURE_MAX_IMAGES", 5))
 CAMERA_INDEX = int(_env_float("POSTURE_CAMERA_INDEX", 0))
 
 STABLE_BAD_SECONDS = _env_float("POSTURE_STABLE_BAD_SECONDS", 10.0)
@@ -111,11 +111,11 @@ if __name__ == "__main__":
             payload = {
                 "ts": int(now),
                 "label": label,
-                "confidence": round(score, 4),
-                "bbox": None if bbox is None else [round(x, 2) for x in bbox],
+                "confidence": str(round(score, 4)),
+                "bbox": None if bbox is None else [str(round(x, 2)) for x in bbox],
                 "alarm": st["alarm"],
                 "posture_changing": st["posture_changing"],
-                "stable_duration_sec": round(st["stable_duration_sec"], 2),
+                "stable_duration_sec": str(round(st["stable_duration_sec"], 2)),
                 "posture_image": POSTURE_JPG,
                 "source_frame": os.path.basename(frame_path),
             }

@@ -10,6 +10,7 @@ from PyQt5 import uic
 import signal
 import os
 import warnings
+import json
 
 # --- Suppress the internal PyQt5/SIP deprecation warnings ---
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -17,8 +18,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # --- 1. Thread-Safe Signals ---
 class MqttSignals(QObject):
     # Unified signal to handle incoming commands (e.g., 'N', 'A', 'P')
-    sensor_data = pyqtSignal(str) 
-    video_frame = pyqtSignal(QImage)
+    data_signal = pyqtSignal(dict) 
 
 # --- 2. The Notification Widget ---
 class NotificationWidget(QWidget):
@@ -89,8 +89,7 @@ class MainWindow(QMainWindow):
 
         # Setup thread-safe signals
         self.mqtt_signals = MqttSignals()
-        self.mqtt_signals.sensor_data.connect(self.handle_sensor_data)
-        self.mqtt_signals.video_frame.connect(self.update_image)
+        self.mqtt_signals.data_signal.connect(self.handle_sensor_data)
 
         # Connect Slider to update logic and publish to RPi5
         if not hasattr(self, 'interval_slider'):
@@ -141,40 +140,39 @@ class MainWindow(QMainWindow):
     def on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code == 0:
             self.status_label.setText("MQTT: Connected | Monitoring Posture...")
-            client.subscribe([("sensor/posture", 0), ("sensor/video", 0)])
+            client.subscribe([("posture/status", 0)])
         else:
             self.status_label.setText(f"MQTT Connection Failed: {reason_code}")
 
     def on_message(self, client, userdata, msg):
-        """Processes incoming data and emits signals safely to the GUI thread."""
-        if msg.topic == "sensor/posture":
-            payload = msg.payload.decode().strip().upper()
-            self.mqtt_signals.sensor_data.emit(payload)
-                
-        elif msg.topic == "sensor/video":
-            nparr = np.frombuffer(msg.payload, np.uint8)
-            cv_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            
-            if cv_img is not None:
-                rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-                h, w, ch = rgb_image.shape
-                bytes_per_line = ch * w
-                
-                qt_img = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
-                p = qt_img.scaled(640, 480, Qt.KeepAspectRatio)
-                self.mqtt_signals.video_frame.emit(p)
+        try:
+            payload = json.loads(msg.payload.decode("utf-8"))
+        except Exception:
+            payload = {"parse_error": True, "raw": msg.payload.decode("utf-8", errors="replace")}
+        self.mqtt_signals.data_signal.emit(payload)
 
-    def handle_sensor_data(self, payload):
-        """Acts strictly on commands from the RPi5."""
-        if payload == "N":
-            # RPi5 says it's time to notify
+    # client.on_message = on_message
+
+    def handle_sensor_data(self, data: dict):
+        print("Received MQTT Data:", data)  # Debug print to see incoming data
+        if  data.get("alarm") is True:
             self.notifier.show_notification()
-        elif payload == "A":
-            # RPi5 says user left frame (pauses work timer)
+        elif data.get("label") == "No posture detected":
             self.is_absent = True
-        elif payload == "P":
-            # RPi5 says user is present in frame (resumes work timer)
+        elif data.get("label") in ("sitting_bad_posture", "sitting_good_posture"):
             self.is_absent = False
+        
+        if data.get("posture_image"):
+            image_path = data["posture_image"]
+            if os.path.exists(image_path):
+                img = cv2.imread(image_path)
+                if img is not None:
+                    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    resized_image = cv2.resize(img_rgb, (640, 480), interpolation=cv2.INTER_AREA)
+                    h, w, ch = resized_image.shape
+                    bytes_per_line = ch * w
+                    qt_img = QImage(resized_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
+                    self.update_image(qt_img)
 
     def update_image(self, qt_img):
         self.video_label.setPixmap(QPixmap.fromImage(qt_img))
