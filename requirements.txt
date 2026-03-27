@@ -1,5 +1,7 @@
 opencv-python
 numpy
 onnxruntime
+paho-mqtt>=1.6.0
+PyQt5
 # ultralytics
 pandas

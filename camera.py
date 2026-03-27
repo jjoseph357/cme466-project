@@ -43,11 +43,26 @@ class CameraCaptureProcess:
 
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def _get_image_path(self) -> str:
-        timestamp = int(time.time())
-        return os.path.join(self.output_dir, f"image_{timestamp}.jpg")
+    def next_capture_path(self) -> str:
+        return os.path.join(self.output_dir, f"image_{time.time_ns()}.jpg")
 
-    def _cleanup_images(self):
+    def _get_image_path(self) -> str:
+        return self.next_capture_path()
+
+    def capture_to_path(self, path: str) -> bool:
+        """Grab a fresh frame and write to path. Camera stays open."""
+        for _ in range(5):
+            self.cap.grab()
+        ret, frame = self.cap.retrieve()
+        if not ret:
+            return False
+        return bool(cv2.imwrite(path, frame))
+
+    def release(self):
+        if self.cap is not None and self.cap.isOpened():
+            self.cap.release()
+
+    def cleanup_old_captures(self):
         """Removes the oldest files if the count exceeds max_images."""
         files = [f for f in os.listdir(self.output_dir) if f.lower().endswith('.jpg')]
         files = sorted(files, key=lambda x: os.path.getmtime(os.path.join(self.output_dir, x)))
@@ -78,7 +93,7 @@ class CameraCaptureProcess:
                     image_path = self._get_image_path()
                     cv2.imwrite(image_path, frame)
                     print(f"Saved: {image_path}")
-                    self._cleanup_images()
+                    self.cleanup_old_captures()
                 else:
                     print("Error: Capture failed. Retrying...")
 
@@ -86,7 +101,7 @@ class CameraCaptureProcess:
                 self._stop_event.wait(self.interval)
         
         finally:
-            self.cap.release()
+            self.release()
             print("Camera hardware released.")
 
     def stop(self):
