@@ -27,7 +27,7 @@ class CameraCaptureProcess:
         self._stop_event = threading.Event()
         
         # Initialize camera once using V4L2 backend
-        self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_V4L2)
+        self.cap = cv2.VideoCapture(self.camera_index)
         
         if not self.cap.isOpened():
             raise RuntimeError(f"Error: Could not open camera index {camera_index}.")

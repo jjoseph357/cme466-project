@@ -1,17 +1,13 @@
 import numpy as np
 import onnxruntime as ort
-import cv2
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 
 classes = ['sitting_good_posture', 'sitting_bad_posture']
 
 
-class PostureDetector:
-    """Interface for the different posture detection models."""
-    def detect(self, img):
-        pass
-
-
-class PostureDetectorYOLOv5(PostureDetector):
+class PostureDetectorYOLOv5:
     def __init__(self, model_path: str, conf_threshold: float = 0.25):
         self.conf_threshold = conf_threshold
         self.session = ort.InferenceSession(
@@ -52,7 +48,7 @@ class PostureDetectorYOLOv5(PostureDetector):
         return classes[label_idx], float(final_conf), bbox
 
 
-class PostureCoach(PostureDetector):
+class PostureCoach:
     def __init__(self, model_path: str, conf_threshold: float = 0.25):
         self.conf_threshold = conf_threshold
         self.session = ort.InferenceSession(
@@ -89,5 +85,13 @@ class PostureCoach(PostureDetector):
 
         if final_conf < self.conf_threshold:
             return None, 0.0, None
+        
+        # This model uses 0 for bad posture and 1 for good posture
+        label_idx = int(1 - label_idx)
 
-        return int(label_idx), float(final_conf), [x1, y1, x2, y2]
+        return classes[label_idx], float(final_conf), [x1, y1, x2, y2]
+
+
+def init_model():
+    return PostureCoach(BASE_DIR / 'PostureCoach-nms.onnx')
+    # return PostureDetectorYOLOv5(BASE_DIR / 'small640.onnx')

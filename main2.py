@@ -5,7 +5,7 @@ import time
 from camera import CameraCaptureProcess
 from mqtt_publisher import init_mqtt, publish_payload, shutdown_mqtt
 from stability_tracker import PostureStabilityTracker
-from model.posture_detector import PostureDetector
+from model.posture_detector import init_model
 from model.image_processing import load_img, draw_and_save
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -58,7 +58,7 @@ if __name__ == "__main__":
         log.error("Model not found: %s", MODEL_PATH)
         raise SystemExit(1)
 
-    detector = PostureDetector(MODEL_PATH, conf_threshold=CONF_THRESHOLD)
+    detector = init_model()
     tracker = PostureStabilityTracker(
         stable_bad_seconds=STABLE_BAD_SECONDS,
         min_iou_for_stable=MIN_BBOX_IOU_STABLE,
