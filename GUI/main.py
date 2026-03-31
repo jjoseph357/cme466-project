@@ -111,7 +111,7 @@ class MainWindow(QMainWindow):
         # Publish to the RPi5 so it knows how long to wait
         # QoS 1 and Retain=True ensures the RPi5 gets it even if it connects a second later
         if hasattr(self, 'client'):
-            self.client.publish("sensor/interval", str(minutes), qos=1, retain=True)
+            self.client.publish("posture/timer", str(minutes), qos=1, retain=True)
 
     def update_work_time(self):
         """Ticks every second to track total work duration."""

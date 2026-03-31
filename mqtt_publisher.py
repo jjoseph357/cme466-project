@@ -31,6 +31,8 @@ def init_mqtt(
     client_id: str = "cme466_posture_rpi",
     username: str | None = None,
     password: str | None = None,
+    timer_topic: str | None = None,
+    on_timer_update: callable | None = None
 ) -> bool:
     global _client, _config
     if not broker:
@@ -43,6 +45,18 @@ def init_mqtt(
     if username:
         client.username_pw_set(username, password or "")
 
+
+    # Handle messages
+    def on_message(client, userdata, msg):
+        if timer_topic and msg.topic == timer_topic:
+            if on_timer_update:
+                try:
+                    val = float(msg.payload.decode().strip())
+                    on_timer_update(val)
+                except ValueError:
+                    log.warning("Invalid timer value received")
+    client.on_message = on_message
+    
     def on_connect_v2(client, userdata, flags, reason_code, properties=None):
         try:
             rc = int(reason_code)

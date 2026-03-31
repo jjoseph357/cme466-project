@@ -44,6 +44,7 @@ def _mqtt_broker() -> str:
 MQTT_BROKER = _mqtt_broker()
 MQTT_PORT = int(_env_float("POSTURE_MQTT_PORT", 1883))
 MQTT_TOPIC = _env_str("POSTURE_MQTT_TOPIC", "posture/status")
+MQTT_TIMER_TOPIC = _env_str("TIMER_MQTT_TOPIC", "posture/timer")
 MQTT_CLIENT_ID = _env_str("POSTURE_MQTT_CLIENT_ID", "cme466_posture_rpi")
 MQTT_USER = os.environ.get("POSTURE_MQTT_USER") or None
 MQTT_PASSWORD = os.environ.get("POSTURE_MQTT_PASSWORD") or None
@@ -63,6 +64,10 @@ if __name__ == "__main__":
         bad_label="sitting_bad_posture",
     )
 
+    def handle_timer_update(new_seconds: float):
+        log.info("Received new timer interval: %.1f", new_seconds)
+        tracker.stable_bad_seconds = new_seconds
+
     if MQTT_BROKER:
         init_mqtt(
             broker=MQTT_BROKER,
@@ -71,6 +76,8 @@ if __name__ == "__main__":
             client_id=MQTT_CLIENT_ID,
             username=MQTT_USER,
             password=MQTT_PASSWORD,
+            timer_topic=MQTT_TIMER_TOPIC,
+            on_timer_update=handle_timer_update
         )
     else:
         log.info("MQTT disabled (POSTURE_MQTT_BROKER is empty).")
