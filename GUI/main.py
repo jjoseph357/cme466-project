@@ -11,6 +11,7 @@ import signal
 import os
 import warnings
 import json
+import base64
 
 # --- Suppress the internal PyQt5/SIP deprecation warnings ---
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -126,7 +127,7 @@ class MainWindow(QMainWindow):
                 self.work_time_label.setText(time_str)
 
     def setup_mqtt(self):
-        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        self.client = mqtt.Client()
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
         
@@ -137,7 +138,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.status_label.setText(f"MQTT Error: Could not connect to {broker_address}")
 
-    def on_connect(self, client, userdata, flags, reason_code, properties):
+    def on_connect(self, client, userdata, flags, reason_code):
         if reason_code == 0:
             self.status_label.setText("MQTT: Connected | Monitoring Posture...")
             client.subscribe([("posture/status", 0)])
@@ -163,16 +164,20 @@ class MainWindow(QMainWindow):
             self.is_absent = False
         
         if data.get("posture_image"):
-            image_path = data["posture_image"]
-            if os.path.exists(image_path):
-                img = cv2.imread(image_path)
-                if img is not None:
-                    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    resized_image = cv2.resize(img_rgb, (640, 480), interpolation=cv2.INTER_AREA)
-                    h, w, ch = resized_image.shape
-                    bytes_per_line = ch * w
-                    qt_img = QImage(resized_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
-                    self.update_image(qt_img)
+            img_bytes = base64.b64decode(data["posture_image"])
+            # if os.path.exists(image_path):
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+            if img is not None:
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                # cv2.imshow("IMAGE",img_rgb)
+
+                resized_image = cv2.resize(img_rgb, (640, 480), interpolation=cv2.INTER_AREA)
+                h, w, ch = resized_image.shape
+                bytes_per_line = ch * w
+                qt_img = QImage(resized_image.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()
+                self.update_image(qt_img)
 
     def update_image(self, qt_img):
         self.video_label.setPixmap(QPixmap.fromImage(qt_img))
