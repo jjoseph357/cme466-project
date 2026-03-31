@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import time
@@ -115,6 +116,10 @@ if __name__ == "__main__":
             now = time.time()
             st = tracker.update(label, bbox, now)
 
+            encoded_img = ""
+            with open(POSTURE_JPG, "rb") as f:
+                encoded_img = base64.b64encode(f.read()).decode("utf-8")
+
             payload = {
                 "ts": int(now),
                 "label": label,
@@ -123,7 +128,7 @@ if __name__ == "__main__":
                 "alarm": st["alarm"],
                 "posture_changing": st["posture_changing"],
                 "stable_duration_sec": str(round(st["stable_duration_sec"], 2)),
-                "posture_image": POSTURE_JPG,
+                "posture_image": encoded_img,
                 "source_frame": os.path.basename(frame_path),
             }
 
