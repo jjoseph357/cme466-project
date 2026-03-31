@@ -67,12 +67,18 @@ def init_mqtt(
         except (TypeError, ValueError):
             if str(reason_code) in ("Success", "0"):
                 log.info("MQTT connected to %s", broker)
+                if timer_topic:
+                    client.subscribe(timer_topic)
+                    log.info("Subscribed to %s", timer_topic)
             else:
                 log.warning("MQTT connect issue: %s", reason_code)
 
     def on_connect_v1(c, u, f, rc):
         if rc == 0:
             log.info("MQTT connected to %s", broker)
+            if timer_topic:
+                    client.subscribe(timer_topic)
+                    log.info("Subscribed to %s", timer_topic)
         else:
             log.warning("MQTT connect rc=%s", rc)
 
