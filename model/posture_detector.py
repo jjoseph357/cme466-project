@@ -8,7 +8,7 @@ classes = ['sitting_good_posture', 'sitting_bad_posture']
 
 
 class PostureDetectorYOLOv5:
-    def __init__(self, model_path: str, conf_threshold: float = 0.25):
+    def __init__(self, model_path: str, conf_threshold: float = 0.5):
         self.conf_threshold = conf_threshold
         self.session = ort.InferenceSession(
             model_path, providers=['CPUExecutionProvider']
@@ -25,15 +25,39 @@ class PostureDetectorYOLOv5:
         out = preds[0]
         obj_conf = out[:, 4]
         class_conf = np.max(out[:, 5:], axis=1)
+        class_ids = np.argmax(out[:, 5:], axis=1)
+
         combined_conf = obj_conf * class_conf
 
-        i = np.where(combined_conf > self.conf_threshold)[0]
+        # --- Tunable parameters ---
+        GOOD_CLASS_ID = 0  # adjust if needed
+        BASE_THRESHOLD = self.conf_threshold
+        GOOD_THRESHOLD = BASE_THRESHOLD * 0.6   # more lenient
+        BAD_THRESHOLD = BASE_THRESHOLD          # stricter
+        GOOD_BIAS = 1.5                         # boost good posture slightly
 
-        if len(i) == 0:
+        candidates = []
+
+        for i in range(len(out)):
+            conf = combined_conf[i]
+            cls = class_ids[i]
+
+            # Apply class-specific threshold
+            if cls == GOOD_CLASS_ID:
+                if conf > GOOD_THRESHOLD:
+                    conf *= GOOD_BIAS  # boost good posture
+                    candidates.append((i, conf))
+            else:
+                if conf > BAD_THRESHOLD:
+                    candidates.append((i, conf))
+
+        if not candidates:
             return "No posture detected", 0.0, None
 
-        best_idx = i[np.argmax(combined_conf[i])]
-        label_idx = np.argmax(out[best_idx, 5:])
+        # Pick best candidate AFTER biasing
+        best_idx = max(candidates, key=lambda x: x[1])[0]
+
+        label_idx = class_ids[best_idx]
         final_conf = combined_conf[best_idx]
 
         x, y, w, h = out[best_idx, :4]
@@ -93,5 +117,5 @@ class PostureCoach:
 
 
 def init_model():
-    return PostureCoach(BASE_DIR / 'PostureCoach-nms.onnx')
-    # return PostureDetectorYOLOv5(BASE_DIR / 'small640.onnx')
+    # return PostureCoach(BASE_DIR / 'PostureCoach-nms.onnx')
+    return PostureDetectorYOLOv5(BASE_DIR / 'small640.onnx')
