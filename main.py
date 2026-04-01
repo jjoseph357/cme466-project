@@ -5,8 +5,9 @@ import time
 
 from camera import CameraCaptureProcess
 from mqtt_publisher import init_mqtt, publish_payload, shutdown_mqtt
+from image_processing import load_img, draw_and_save
+from posture_detector import init_model
 from stability_tracker import PostureStabilityTracker
-from model.get_posture import PostureDetector, draw_and_save
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -26,14 +27,12 @@ def _env_str(key: str, default: str) -> str:
 
 IMAGES_DIR = _env_str("POSTURE_IMAGES_DIR", "images")
 POSTURE_JPG = _env_str("POSTURE_OUTPUT_IMAGE", "posture.jpg")
-MODEL_PATH = _env_str("POSTURE_MODEL_PATH", os.path.join("model", "small640.onnx"))
 IMG_INTERVAL = _env_float("POSTURE_CAPTURE_INTERVAL", 1.0)
 MAX_IMAGES = int(_env_float("POSTURE_MAX_IMAGES", 5))
 CAMERA_INDEX = int(_env_float("POSTURE_CAMERA_INDEX", 0))
 
 STABLE_BAD_SECONDS = _env_float("POSTURE_STABLE_BAD_SECONDS", 10.0)
 MIN_BBOX_IOU_STABLE = _env_float("POSTURE_MIN_BBOX_IOU_STABLE", 0.85)
-CONF_THRESHOLD = _env_float("POSTURE_CONF_THRESHOLD", 0.50)
 
 def _mqtt_broker() -> str:
     """Unset → public test broker (no local Mosquitto). POSTURE_MQTT_BROKER= empty → MQTT off."""
@@ -54,11 +53,7 @@ MQTT_PASSWORD = os.environ.get("POSTURE_MQTT_PASSWORD") or None
 if __name__ == "__main__":
     os.makedirs(IMAGES_DIR, exist_ok=True)
 
-    if not os.path.isfile(MODEL_PATH):
-        log.error("Model not found: %s", MODEL_PATH)
-        raise SystemExit(1)
-
-    detector = PostureDetector(MODEL_PATH, conf_threshold=CONF_THRESHOLD)
+    detector = init_model()
     tracker = PostureStabilityTracker(
         stable_bad_seconds=STABLE_BAD_SECONDS,
         min_iou_for_stable=MIN_BBOX_IOU_STABLE,
@@ -105,13 +100,13 @@ if __name__ == "__main__":
             camera.cleanup_old_captures()
 
             try:
-                label, score, bbox = detector.detect(frame_path)
+                img = load_img(frame_path)
+                label, score, bbox = detector.detect(img)
+                draw_and_save(img, bbox, label, score, POSTURE_JPG)
             except Exception as e:
                 log.exception("Posture detection failed: %s", e)
                 time.sleep(IMG_INTERVAL)
                 continue
-
-            draw_and_save(frame_path, bbox, label, score, POSTURE_JPG)
 
             now = time.time()
             st = tracker.update(label, bbox, now)
