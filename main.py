@@ -33,7 +33,7 @@ CAMERA_INDEX = int(_env_float("POSTURE_CAMERA_INDEX", 0))
 
 STABLE_BAD_SECONDS = _env_float("POSTURE_STABLE_BAD_SECONDS", 10.0)
 MIN_BBOX_IOU_STABLE = _env_float("POSTURE_MIN_BBOX_IOU_STABLE", 0.85)
-CONF_THRESHOLD = _env_float("POSTURE_CONF_THRESHOLD", 0.25)
+CONF_THRESHOLD = _env_float("POSTURE_CONF_THRESHOLD", 0.50)
 
 def _mqtt_broker() -> str:
     """Unset → public test broker (no local Mosquitto). POSTURE_MQTT_BROKER= empty → MQTT off."""

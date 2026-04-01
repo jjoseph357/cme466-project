@@ -40,6 +40,7 @@ class PostureStabilityTracker:
         self.bad_label = bad_label
         self._prev_bbox: list[float] | None = None
         self._stable_since: float | None = None
+        self._prev_is_bad: bool | None = None
 
     def update(self, label: str, bbox: list[float] | None, t: float) -> dict[str, Any]:
         no_pose = bbox is None or label == "No posture detected"
@@ -47,11 +48,14 @@ class PostureStabilityTracker:
         if no_pose:
             self._prev_bbox = None
             self._stable_since = None
+            self._prev_is_bad = None
             return {
                 "posture_changing": True,
                 "stable_duration_sec": 0.0,
                 "alarm": False,
             }
+
+        is_bad = label == self.bad_label
 
         posture_changing = True
         if self._prev_bbox is not None:
@@ -62,6 +66,7 @@ class PostureStabilityTracker:
 
         if posture_changing:
             self._stable_since = None
+            self._prev_is_bad = is_bad
             return {
                 "posture_changing": True,
                 "stable_duration_sec": 0.0,
@@ -70,10 +75,13 @@ class PostureStabilityTracker:
 
         if self._stable_since is None:
             self._stable_since = t
+        elif self._prev_is_bad is not None and self._prev_is_bad != is_bad:
+            self._stable_since = t
 
         stable_duration = t - self._stable_since
-        is_bad = label == self.bad_label
-        alarm = is_bad and stable_duration >= self.stable_bad_seconds
+        self._prev_is_bad = is_bad
+        alarm = stable_duration >= self.stable_bad_seconds
+        alarm = is_bad and alarm
 
         return {
             "posture_changing": False,
