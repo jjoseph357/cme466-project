@@ -117,5 +117,5 @@ class PostureCoach:
 
 
 def init_model():
-    # return PostureCoach(BASE_DIR / 'PostureCoach-nms.onnx')
-    return PostureDetectorYOLOv5(BASE_DIR / 'small640.onnx')
+    return PostureCoach(BASE_DIR / 'PostureCoach-nms.onnx')
+    # return PostureDetectorYOLOv5(BASE_DIR / 'small640.onnx')

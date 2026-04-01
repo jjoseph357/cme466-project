@@ -44,7 +44,6 @@ def _mqtt_broker() -> str:
 
 
 MQTT_BROKER = _mqtt_broker()
-MQTT_BROKER = None
 MQTT_PORT = int(_env_float("POSTURE_MQTT_PORT", 1883))
 MQTT_TOPIC = _env_str("POSTURE_MQTT_TOPIC", "posture/status")
 MQTT_TIMER_TOPIC = _env_str("TIMER_MQTT_TOPIC", "posture/timer")
@@ -134,7 +133,7 @@ if __name__ == "__main__":
                 "source_frame": os.path.basename(frame_path),
             }
 
-            # publish_payload(payload)
+            publish_payload(payload)
 
             log.info(
                 "%s (%.1f%%) alarm=%s changing=%s stable=%.1fs -> %s",
