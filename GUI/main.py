@@ -13,15 +13,16 @@ import warnings
 import json
 import base64
 
-# --- Suppress the internal PyQt5/SIP deprecation warnings ---
+
+# Suppress the internal PyQt5/SIP deprecation warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-# --- 1. Thread-Safe Signals ---
+# Thread-Safe Signals 
 class MqttSignals(QObject):
-    # Unified signal to handle incoming commands (e.g., 'N', 'A', 'P')
+    # Unified signal to handle incoming commands
     data_signal = pyqtSignal(dict) 
 
-# --- 2. The Notification Widget ---
+# The Notification Widget
 class NotificationWidget(QWidget):
     def __init__(self):
         super().__init__()
@@ -60,7 +61,7 @@ class NotificationWidget(QWidget):
         
         self.hide_timer.start(6000)
 
-# --- 3. The Main Window Application ---
+# The Main Window Application 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -68,7 +69,7 @@ class MainWindow(QMainWindow):
         # Get the absolute path of the directory where main.py lives
         script_dir = os.path.dirname(os.path.abspath(__file__))
         ui_path = os.path.join(script_dir, "posture_gui.ui")
-        
+
         try:
             uic.loadUi(ui_path, self)
         except FileNotFoundError:
@@ -87,7 +88,21 @@ class MainWindow(QMainWindow):
         # State Variables
         self.work_seconds = 0
         self.is_absent = False
+        # Variables for Stats
+        self.total_alarms = 0
+        self.stop_alarm = False
+        self.good_seconds = 0
+        self.bad_seconds = 0
+        self.session_score = 0.0
+        
+        self.current_label = "No posture detected"
+        self.display_status = "Absent"
+        self.current_confidence = 0.0
+        self.current_hold_time = 0.0
 
+        self.video_label.setMinimumSize(1, 1)
+        self.video_label.setScaledContents(False)
+        
         # Setup thread-safe signals
         self.mqtt_signals = MqttSignals()
         self.mqtt_signals.data_signal.connect(self.handle_sensor_data)
@@ -115,17 +130,43 @@ class MainWindow(QMainWindow):
             self.client.publish("posture/timer", str(minutes), qos=1, retain=True)
             print(f"GUI: Published new timer interval ({minutes}) to 'posture/timer'")
 
+    def update_stats_display(self):
+        # Builds a single string of all stats and updates the one label
+        if hasattr(self, 'current_status_label'):
+            stats_text = (
+                f"Status: {self.display_status}  |  "
+                f"Confidence: {self.current_confidence:.1f}%  |  "
+                f"Hold Time: {self.current_hold_time:.1f}s  |  "
+                f"Alarms: {self.total_alarms}  |  "
+                f"Session Health: {self.session_score:.1f}%"
+            )
+            self.current_status_label.setText(stats_text)
+
     def update_work_time(self):
-        """Ticks every second to track total work duration."""
+        """Ticks every second to track total work duration and posture ratio."""
         if not self.is_absent:
             self.work_seconds += 1
             
+            # Update overall work time
             hours, remainder = divmod(self.work_seconds, 3600)
             minutes, seconds = divmod(remainder, 60)
             time_str = f"Time Worked: {hours:02d}:{minutes:02d}:{seconds:02d}"
             
             if hasattr(self, 'work_time_label'):
                 self.work_time_label.setText(time_str)
+
+            # Posture Health Score
+            if self.current_label == "sitting_good_posture":
+                self.good_seconds += 1
+            elif self.current_label == "sitting_bad_posture":
+                self.bad_seconds += 1
+                
+            total_posture_time = self.good_seconds + self.bad_seconds
+            if total_posture_time > 0:
+                self.session_score = (self.good_seconds / total_posture_time) * 100
+            
+            # Update the single label
+            self.update_stats_display()
 
     def setup_mqtt(self):
         self.client = mqtt.Client()
@@ -154,27 +195,65 @@ class MainWindow(QMainWindow):
         self.mqtt_signals.data_signal.emit(payload)
 
     # client.on_message = on_message
-
+    
     def handle_sensor_data(self, data: dict):
-        print("Received MQTT Data:", data)  # Debug print to see incoming data
-        if  data.get("alarm") is True:
+
+        # Track alarms
+
+        if data.get("alarm") and not self.stop_alarm:
             self.notifier.show_notification()
-        elif data.get("label") == "No posture detected":
-            self.is_absent = True
-        elif data.get("label") in ("sitting_bad_posture", "sitting_good_posture"):
-            self.is_absent = False
+            self.total_alarms += 1
+            self.stop_alarm = True
+        if data.get("alarm") is False:
+            self.stop_alarm = False
+            
+
+        # Track current status and presence
+        label = data.get("label", "Unknown")
+        self.current_label = label # Save for the 1-second timer
         
+        if label == "No posture detected":
+            self.is_absent = True
+            display_status = "Absent"
+        elif label == "sitting_bad_posture":
+            self.is_absent = False
+            display_status = "Bad Posture"
+            # print("Getting bad posture")
+        elif label == "sitting_good_posture":
+            self.is_absent = False
+            display_status = "Good Posture"
+            # print("Getting good posture")
+        else:
+            display_status = label
+
+        self.display_status = display_status
+
+        # Update Confidence
+        if data.get("confidence"):
+            # Convert "0.95" to 95.0%
+            self.current_confidence = float(data["confidence"]) * 100
+
+        # Update Hold Time (Stagnation)
+        if data.get("stable_duration_sec"):
+            self.current_hold_time = float(data["stable_duration_sec"])
+
+        self.update_stats_display()
+
+        # Handle the image rendering
         if data.get("posture_image"):
             img_bytes = base64.b64decode(data["posture_image"])
-            # if os.path.exists(image_path):
             nparr = np.frombuffer(img_bytes, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
             if img is not None:
                 img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                # cv2.imshow("IMAGE",img_rgb)
-
-                resized_image = cv2.resize(img_rgb, (640, 480), interpolation=cv2.INTER_AREA)
+                
+                # Dynamically grab the current dimensions of the UI label
+                target_width = self.video_label.width()
+                target_height = self.video_label.height()
+                
+                resized_image = cv2.resize(img_rgb, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                
                 h, w, ch = resized_image.shape
                 bytes_per_line = ch * w
                 qt_img = QImage(resized_image.data, w, h, bytes_per_line, QImage.Format_RGB888).copy()

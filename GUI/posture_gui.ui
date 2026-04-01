@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>571</width>
-    <height>457</height>
+    <height>513</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -84,6 +84,22 @@ color: rgb(136, 136, 136)</string>
       </property>
      </widget>
     </item>
+    <item>
+     <widget class="QLabel" name="current_status_label">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="text">
+       <string>current_status_label</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignCenter</set>
+      </property>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QMenuBar" name="menubar">
@@ -92,7 +108,7 @@ color: rgb(136, 136, 136)</string>
      <x>0</x>
      <y>0</y>
      <width>571</width>
-     <height>21</height>
+     <height>30</height>
     </rect>
    </property>
   </widget>
